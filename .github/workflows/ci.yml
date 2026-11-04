@@ -89,14 +89,15 @@ jobs:
           rpmbuild -ba build-aux/clipperino.spec
           rpmlint build-aux/clipperino.spec ~/rpmbuild/RPMS/x86_64/clipperino-*.rpm
           rpm -qp --requires ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm
+          # One flat directory: the release and the repository take the files as they are.
+          mkdir -p "$RUNNER_TEMP/out"
+          cp ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm ~/rpmbuild/SRPMS/clipperino-[0-9]*.src.rpm "$RUNNER_TEMP/out/"
 
       - name: Upload RPMs
         uses: actions/upload-artifact@v4
         with:
           name: clipperino-rpms-unsigned
-          path: |
-            ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm
-            ~/rpmbuild/SRPMS/clipperino-[0-9]*.src.rpm
+          path: ${{ runner.temp }}/out/*.rpm
           if-no-files-found: error
 
       # The spec downloads these from the release (Source0, Source1).
