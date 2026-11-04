@@ -11,6 +11,8 @@
 - The package installs its own `/etc/yum.repos.d/clipperino.repo` and the
   signing key, so the repository stays configured. If you added the old
   repository, this update replaces its file; the old address keeps working.
+- The package recommends `gnome-shell-extension-appindicator`, which GNOME
+  Shell needs to show the status icon.
 
 ## 1.3.2 (2026-09-29)
 

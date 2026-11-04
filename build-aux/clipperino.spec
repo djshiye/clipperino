@@ -30,6 +30,8 @@ Requires:       libadwaita%{?_isa} >= 1.9
 Requires:       hicolor-icon-theme
 # Clipboard monitoring, the global shortcut and autostart all go through portals.
 Recommends:     xdg-desktop-portal-gnome
+# The status icon is an AppIndicator; GNOME Shell shows it with this extension.
+Recommends:     gnome-shell-extension-appindicator
 # Renamed from Clipped in 1.1.0.
 Obsoletes:      clipped < 1.1.0
 Provides:       clipped = %{version}-%{release}
@@ -80,6 +82,7 @@ install -Dpm 0644 %{SOURCE2} %{buildroot}%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-
 * Wed Nov 04 2026 Dino Klisura <115914552+djshiye@users.noreply.github.com> - 1.4.0-1
 - Signed packages and dnf repository; one package for every Fedora release
 - The package installs its own repository file and signing key
+- Recommend the AppIndicator extension, which shows the status icon on GNOME
 
 * Tue Sep 29 2026 djshiye <dreamfantom16@gmail.com> - 1.3.2-1
 - Reconnect clipboard access after GNOME ends the permission session
