@@ -51,6 +51,11 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="1.4.0" date="2026-11-04">
+      <description>
+        <p>Packages and the dnf repository are now signed, and one package works on every current Fedora release. The package installs its own repository file and signing key, so the repository stays configured.</p>
+      </description>
+    </release>
     <release version="1.3.2" date="2026-09-29">
       <description>
         <p>Fixes recording staying off after GNOME ended the clipboard permission session: Clipperino now reconnects on its own, and the Grant Access button works again. Adds a Flatpak build and screenshots for software centres.</p>

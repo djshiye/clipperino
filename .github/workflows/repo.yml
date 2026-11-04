@@ -1,8 +1,11 @@
 name: dnf repository
 
-# Publishes the latest GitHub release's RPM as a dnf repository on GitHub
-# Pages, so `dnf upgrade` picks up new versions. Runs after each release
-# (called from ci.yml) or by hand from the Actions tab.
+# Publishes the signed RPMs of the last three GitHub releases as one dnf
+# repository on GitHub Pages (https://djshiye.github.io/clipperino/rpm/), so
+# `dnf upgrade` picks up new versions on every Fedora release. Older
+# addresses (fedora/<N>/x86_64/) get metadata that points at the same files.
+# Runs after each release (called from ci.yml) or by hand from the Actions tab,
+# then installs the result in clean Fedora 44 and 45 containers.
 on:
   workflow_call:
   workflow_dispatch:
@@ -16,43 +19,101 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  APP: clipperino
+  SITE_URL: https://djshiye.github.io/clipperino
+
 jobs:
   publish:
-    name: Publish dnf repository
+    name: Build signed repository
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    container:
+      image: fedora:44
+    outputs:
+      evr: ${{ steps.site.outputs.evr }}
     steps:
-      - name: Install createrepo_c
-        run: sudo apt-get update && sudo apt-get install -y createrepo-c
+      - uses: actions/checkout@v4
 
-      - name: Build repository
+      - name: Download the last three releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only Fedora 44 builds are released; the path carries the version
-          # so a future Fedora gets its own directory.
-          DIR=site/fedora/44/x86_64
-          mkdir -p "$DIR"
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'clipperino-[0-9]*.fc44.x86_64.rpm' --dir "$DIR"
-          createrepo_c "$DIR"
-          BASE="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
-          # Packages are unsigned; HTTPS from GitHub Pages is the trust anchor.
-          cat > site/clipperino.repo <<EOF
-          [clipperino]
-          name=Clipperino
-          baseurl=${BASE}/fedora/\$releasever/\$basearch/
-          enabled=1
-          gpgcheck=0
-          metadata_expire=1h
-          skip_if_unavailable=True
-          EOF
-          ls -R site
+          dnf install -y --setopt=install_weak_deps=False gh rpm-sign createrepo_c python3-rpm gnupg2
+          mkdir -p new prev
+          i=0
+          for tag in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 3 \
+                         --exclude-drafts --exclude-pre-releases --json tagName -q '.[].tagName'); do
+            [ "$i" -eq 0 ] && dir=new || dir=prev
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$dir" \
+              --pattern 'clipperino-[0-9]*.x86_64.rpm' --pattern 'clipperino-[0-9]*.src.rpm' || true
+            i=$((i + 1))
+          done
+          ls -l new prev
+
+      - name: Build repository
+        id: site
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+        run: |
+          printf '%s\n' "$RPM_SIGNING_KEY" | gpg --batch --quiet --import
+          FPR=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr/ {print $10; exit}')
+          gpg --batch --armor --export-options export-minimal --export "$FPR" > "$RUNNER_TEMP/key.asc"
+          # Releases from before signing are left out (they would fail gpgcheck).
+          python3 build-aux/dnf-repo.py --app "$APP" --url "$SITE_URL" --title Clipperino \
+            --summary "Clipboard history manager for GNOME" \
+            --icon data/icons/hicolor/scalable/apps/io.github.djshiye.Clipperino.svg \
+            --new new --prev prev --site site \
+            --legacy 'fedora/{N}/x86_64' \
+            --repo-file build-aux/clipperino.repo --key "$RUNNER_TEMP/key.asc"
+          gpgconf --kill all
+          echo "evr=$(rpm -qp --nosignature --qf '%{VERSION}-%{RELEASE}' new/clipperino-[0-9]*.x86_64.rpm)" >> "$GITHUB_OUTPUT"
+          echo "### Signed with key \`$FPR\`" >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: publish
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  # A clean container adds the repository from its URL (or still has the old
+  # per-Fedora .repo file), installs with signature checks on, and runs it.
+  verify:
+    name: Install on Fedora ${{ matrix.fedora }} (${{ matrix.setup }} repo file)
+    needs: [publish, deploy]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: [44, 45]
+        setup: [new, legacy]
+    container:
+      image: fedora:${{ matrix.fedora }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: build-aux/verify-install.sh
+          sparse-checkout-cone-mode: false
+      - name: Install from the published repository
+        run: |
+          sh build-aux/verify-install.sh "${{ matrix.setup }}" "$APP" "$SITE_URL" \
+            "${{ needs.publish.outputs.evr }}" "$SITE_URL/fedora/\$releasever/\$basearch/"
+      - name: Smoke test
+        run: |
+          # Every library the binary links against resolves on this release.
+          ! ldd /usr/bin/clipperino | grep 'not found'
+          # Launch it headless (GTK's Broadway backend); still running after 15 s is a pass.
+          dnf install -y --setopt=install_weak_deps=False dbus-daemon
+          broadwayd :5 & sleep 2
+          rc=0
+          GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 dbus-run-session -- timeout 15 clipperino || rc=$?
+          echo "clipperino exit status: $rc"
+          [ "$rc" -eq 124 ] || [ "$rc" -eq 0 ]

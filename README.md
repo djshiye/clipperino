@@ -78,9 +78,13 @@ sudo dnf config-manager addrepo --from-repofile=https://djshiye.github.io/clippe
 sudo dnf install clipperino
 ```
 
-The repository is published to GitHub Pages from each release by
-`.github/workflows/repo.yml`. Its packages are unsigned (`gpgcheck=0`), so
-you trust them because they come over HTTPS from this repository. You can
+One package works on every current Fedora release. The repository is
+published to GitHub Pages from each release by `.github/workflows/repo.yml`
+and keeps the last three releases. Packages and repository metadata are
+signed; dnf asks once to trust the key
+([RPM-GPG-KEY-djshiye](https://djshiye.github.io/clipperino/RPM-GPG-KEY-djshiye)).
+The package installs its own `/etc/yum.repos.d/clipperino.repo` and the key,
+so the repository stays configured. You can
 also download the RPM from the [latest release](https://github.com/djshiye/Clipperino/releases/latest)
 and install it with `sudo dnf install ./clipperino-*.rpm`, but then it won't
 receive updates.
@@ -145,18 +149,21 @@ since Flatpak builds are offline.
 ### Build the RPM
 
 ```bash
-cargo vendor vendor && tar -cJf clipperino-1.3.2-vendor.tar.xz vendor
-# source tarball named clipperino-1.3.2.tar.gz with a clipperino-1.3.2/ prefix
-rpmdev-setuptree && cp clipperino-1.3.2*.tar.* ~/rpmbuild/SOURCES/
+cargo vendor vendor && tar -cJf clipperino-1.4.0-vendor.tar.xz vendor
+# source tarball named clipperino-1.4.0.tar.gz with a clipperino-1.4.0/ prefix
+rpmdev-setuptree && cp clipperino-1.4.0*.tar.* ~/rpmbuild/SOURCES/
 rpmbuild -ba build-aux/clipperino.spec
 ```
 
 CI (`.github/workflows/ci.yml`) runs formatting, clippy and unit tests on
 Fedora 44 for every push, with the Cargo build cached, and on Rawhide weekly.
-Pushing a `v*` tag builds the RPM once (its `%check` runs the Meson
-validation tests), publishes a GitHub release with the RPM and the source
-and vendor tarballs the spec expects, and refreshes the dnf repository on
-GitHub Pages.
+Pushing a `v*` tag builds the RPM once on Fedora 44, the oldest supported
+release (its `%check` runs the Meson validation tests), signs the RPM and the
+source RPM (key in the `RPM_SIGNING_KEY` secret), publishes a GitHub release
+with them and the source and vendor tarballs the spec expects, refreshes the
+signed dnf repository on GitHub Pages and installs it from there in clean
+Fedora 44 and 45 containers. The spec also needs the public key as
+`RPM-GPG-KEY-djshiye` in `SOURCES` (CI exports it from the secret).
 
 ## Project layout
 

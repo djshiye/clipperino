@@ -1,7 +1,7 @@
 %global app_id io.github.djshiye.Clipperino
 
 Name:           clipperino
-Version:        1.3.2
+Version:        1.4.0
 Release:        1%{?dist}
 Summary:        Clipboard history manager for GNOME
 
@@ -10,6 +10,8 @@ URL:            https://github.com/djshiye/Clipperino
 Source0:        %{url}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 # cargo vendor --locked, from the same tag
 Source1:        %{url}/releases/download/v%{version}/%{name}-%{version}-vendor.tar.xz
+# The public package signing key; CI exports it from the signing secret.
+Source2:        RPM-GPG-KEY-djshiye
 
 BuildRequires:  cargo-rpm-macros >= 24
 BuildRequires:  meson >= 1.0
@@ -50,6 +52,9 @@ export RUSTFLAGS="%{build_rustflags}"
 
 %install
 %meson_install
+# The DNF repository definition and its signing key, so the repository keeps itself configured.
+install -Dpm 0644 build-aux/%{name}.repo %{buildroot}%{_sysconfdir}/yum.repos.d/%{name}.repo
+install -Dpm 0644 %{SOURCE2} %{buildroot}%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-djshiye-%{name}
 
 %check
 %meson_test
@@ -65,8 +70,17 @@ export RUSTFLAGS="%{build_rustflags}"
 %{_datadir}/icons/hicolor/scalable/apps/%{app_id}.svg
 %{_datadir}/icons/hicolor/symbolic/apps/%{app_id}-symbolic.svg
 %{_datadir}/metainfo/%{app_id}.metainfo.xml
+# Plain %%config, not noreplace: an upgrade replaces an older hand-added copy
+# (saved as .rpmorig/.rpmsave), which is how users of the old per-Fedora
+# repository move to the signed one.
+%config %{_sysconfdir}/yum.repos.d/%{name}.repo
+%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-djshiye-%{name}
 
 %changelog
+* Wed Nov 04 2026 Dino Klisura <115914552+djshiye@users.noreply.github.com> - 1.4.0-1
+- Signed packages and dnf repository; one package for every Fedora release
+- The package installs its own repository file and signing key
+
 * Tue Sep 29 2026 djshiye <dreamfantom16@gmail.com> - 1.3.2-1
 - Reconnect clipboard access after GNOME ends the permission session
 - Flatpak manifest and store screenshots

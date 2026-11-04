@@ -2,9 +2,10 @@ name: CI
 
 # Pushes and pull requests: format, lint and unit tests on Fedora 44, with
 # the Cargo build cached between runs (a few minutes, mostly dnf).
-# Version tags (v*): build the RPM once (its %check runs the Meson
-# validation tests), publish the GitHub release, refresh the dnf repository,
-# and attach a Flatpak bundle.
+# Version tags (v*): build the RPM once on Fedora 44, the oldest supported
+# release (its %check runs the Meson validation tests); the same package
+# serves every newer Fedora. Sign it, publish the GitHub release, refresh
+# the signed dnf repository, and attach a Flatpak bundle.
 # Weekly: the same checks on Rawhide, to hear early about toolchain breakage.
 on:
   push:
@@ -56,7 +57,21 @@ jobs:
           dnf install -y --setopt=install_weak_deps=False \
             rust cargo meson ninja-build gcc gtk4-devel libadwaita-devel \
             sqlite-devel blueprint-compiler desktop-file-utils appstream gettext \
-            rpm-build rpmdevtools rpmlint cargo-rpm-macros python3 tar xz
+            rpm-build rpmdevtools rpmlint cargo-rpm-macros python3 tar xz gnupg2
+
+      # The only step that sees the signing secret, before any project code
+      # runs: it exports the public half for the package and forgets the rest.
+      - name: Public signing key
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+        run: |
+          test -n "$RPM_SIGNING_KEY" || { echo "::error::The RPM_SIGNING_KEY secret is not set."; exit 1; }
+          rpmdev-setuptree
+          export GNUPGHOME=$(mktemp -d)
+          printf '%s\n' "$RPM_SIGNING_KEY" | gpg --batch --quiet --import
+          gpg --batch --armor --export-options export-minimal --export > ~/rpmbuild/SOURCES/RPM-GPG-KEY-djshiye
+          gpgconf --kill all
+          rm -rf "$GNUPGHOME"
 
       - name: Build RPM
         run: |
@@ -70,16 +85,18 @@ jobs:
           tar --no-wildcards-match-slash \
               --exclude=./target --exclude=./.git --exclude=./spikes \
               --transform "s,^\./,clipperino-${VERSION}/," -czf "$DIST/clipperino-${VERSION}.tar.gz" .
-          rpmdev-setuptree
           cp "$DIST"/clipperino-${VERSION}*.tar.* ~/rpmbuild/SOURCES/
           rpmbuild -ba build-aux/clipperino.spec
           rpmlint build-aux/clipperino.spec ~/rpmbuild/RPMS/x86_64/clipperino-*.rpm
+          rpm -qp --requires ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm
 
-      - name: Upload RPM
+      - name: Upload RPMs
         uses: actions/upload-artifact@v4
         with:
-          name: clipperino-rpm-fedora-44
-          path: ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm
+          name: clipperino-rpms-unsigned
+          path: |
+            ~/rpmbuild/RPMS/x86_64/clipperino-[0-9]*.rpm
+            ~/rpmbuild/SRPMS/clipperino-[0-9]*.src.rpm
           if-no-files-found: error
 
       # The spec downloads these from the release (Source0, Source1).
@@ -90,9 +107,39 @@ jobs:
           path: ~/rpmbuild/SOURCES/clipperino-*.tar.*
           if-no-files-found: error
 
+  # Signing runs apart from the build, so no project code sees the private key.
+  sign:
+    name: Sign RPMs
+    needs: rpm
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:44
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: clipperino-rpms-unsigned
+          path: rpms
+      - name: Sign
+        env:
+          RPM_SIGNING_KEY: ${{ secrets.RPM_SIGNING_KEY }}
+        run: |
+          dnf install -y --setopt=install_weak_deps=False rpm-sign gnupg2
+          printf '%s\n' "$RPM_SIGNING_KEY" | gpg --batch --quiet --import
+          FPR=$(gpg --batch --with-colons --list-secret-keys | awk -F: '/^fpr/ {print $10; exit}')
+          rpmsign --define "_gpg_name $FPR" --addsign rpms/*.rpm
+          gpg --batch --armor --export "$FPR" > key.asc
+          rpm --import key.asc
+          rpm -K rpms/*.rpm
+          gpgconf --kill all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clipperino-rpms
+          path: rpms/*.rpm
+          if-no-files-found: error
+
   release:
     name: Publish GitHub release
-    needs: rpm
+    needs: sign
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -101,7 +148,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          path: assets
+          name: clipperino-rpms
+          path: assets/clipperino-rpms
+      - uses: actions/download-artifact@v4
+        with:
+          name: clipperino-sources
+          path: assets/clipperino-sources
 
       - name: Create release
         env:
@@ -116,7 +168,7 @@ jobs:
           ' CHANGELOG.md > notes.md
           test -s notes.md || { echo "No CHANGELOG.md section for $VERSION"; exit 1; }
           gh release create "$GITHUB_REF_NAME" \
-            assets/clipperino-sources/* assets/clipperino-rpm-fedora-44/*.rpm \
+            assets/clipperino-sources/* assets/clipperino-rpms/*.rpm \
             --repo "$GITHUB_REPOSITORY" \
             --title "Clipperino $VERSION" \
             --notes-file notes.md
@@ -165,3 +217,4 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/repo.yml
+    secrets: inherit

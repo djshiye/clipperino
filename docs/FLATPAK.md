@@ -92,7 +92,7 @@ before doing it.
    sources:
      - type: git
        url: https://github.com/djshiye/clipperino.git
-       tag: v1.3.2
+       tag: v1.4.0
        commit: <full sha of the tag>
      - cargo-sources.json
    ```

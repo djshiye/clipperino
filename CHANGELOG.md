@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.4.0 (2026-11-04)
+
+- **Signed packages**: the RPMs and the dnf repository metadata are signed,
+  so dnf checks them (`gpgcheck=1`, `repo_gpgcheck=1`) and asks once to
+  trust the key.
+- **One package for every Fedora**: the repository moved to
+  `https://djshiye.github.io/clipperino/rpm/`, without a Fedora version in
+  the path. The package is built on Fedora 44 and works on 44, 45 and later.
+- The package installs its own `/etc/yum.repos.d/clipperino.repo` and the
+  signing key, so the repository stays configured. If you added the old
+  repository, this update replaces its file; the old address keeps working.
+
 ## 1.3.2 (2026-09-29)
 
 - **Fix:** after GNOME ended the clipboard permission session, Clipperino

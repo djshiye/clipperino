@@ -1,0 +1,10 @@
+# Installed and kept up to date by the clipperino package.
+[clipperino]
+name=Clipperino
+baseurl=https://djshiye.github.io/clipperino/rpm/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://djshiye.github.io/clipperino/RPM-GPG-KEY-djshiye
+metadata_expire=1h
+skip_if_unavailable=True
