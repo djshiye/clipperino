@@ -25,7 +25,17 @@ install_pkg() {
 case $setup in
 new)
     dnf install -y dnf5-plugins
-    dnf config-manager addrepo --from-repofile="$url/$app.repo"
+    # Pages may serve the previous .repo file for a few minutes after a deploy.
+    i=0
+    while :; do
+        rm -f "$repo"
+        dnf config-manager addrepo --from-repofile="$url/$app.repo"
+        grep -q "^baseurl=$url/rpm/\$" "$repo" && break
+        i=$((i + 1))
+        [ "$i" -lt 20 ] || { echo "$url/$app.repo is still the old file" >&2; exit 1; }
+        echo "--- old .repo file still served, retrying in 30 s ($i/20)"
+        sleep 30
+    done
     cat "$repo"
     grep -qx 'gpgcheck=1' "$repo"
     grep -qx 'repo_gpgcheck=1' "$repo"
@@ -60,5 +70,5 @@ cd "$(mktemp -d)"
 dnf download "$app-$evr"
 rpm -K ./*.rpm
 rpm -K ./*.rpm | grep -q 'digests signatures OK'
-rpm -qi "$app" | grep -E '^Signature'
+rpm -q --qf 'Signature: %{SIGPGP:pgpsig}\n' "$app"
 echo "OK: $app-$evr installed from $url with gpgcheck and repo_gpgcheck on"
